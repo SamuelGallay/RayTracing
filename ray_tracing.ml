@@ -14,12 +14,19 @@ let cross u v = cons_v (u.y*.v.z-.u.z*.v.y) (u.z*.v.x-.u.x*.v.z) (u.x*.v.y-.u.y*
 
 let list_ij l c = List.init (l*c) (fun k -> (k/c, k-k/c*c));;
 
+ (* Convention : P(t) = a + t*b;  ||b|| = 1 *)
+type ray = {a : vect; b : vect}
+type geometry = Sphere of vect * float
+type material = Lambertian of vect | Metal of vect | Glass of float
+type hittable = Hittable of geometry * material | HittableList of hittable list
+type hitRecord = {mat : material; p : vect; n : vect; t : float}
 type camera = {w : int; h : int; p: vect; vp_c : vect; vp_v: vect; vp_h: vect};;
+
 let mycamera () =
   let ratio = 16./.9. in
   let width = 1440 in
-  let pos = cons_v (-.0.5) (-.10.) 5. in
-  let dir = cons_v (0.1) 1. (-.0.5) in
+  let pos = cons_v (0.5) (0.5) 2. in
+  let dir = cons_v (1.) 1. (-.0.1) in
   let alpha = 0.4 in
 
   let z = (-1.)*~(normalize dir) in
@@ -27,14 +34,10 @@ let mycamera () =
   let y = cross z x in
   {w=width; h=int_of_float (1./.ratio*.(float width)); p=pos; vp_c=pos-~z; vp_v=(tan alpha /. ratio)*~y; vp_h=(tan alpha)*~x};;
 
-(* Convention : P(t) = a + t*b;  ||b|| = 1 *)
-type ray = {a : vect; b : vect}
-type geometry = Sphere of vect * float
-type material = Lambertian of vect | Metal of vect | Glass of float
-type hittable = Hittable of geometry * material | HittableList of hittable list
-type hitRecord = {mat : material; p : vect; n : vect; t : float}
-
 let mat_floor = Metal (cons_v 0.5 0.5 0.5)
+let s1 = Hittable ((Sphere ((cons_v 15. 15. 2.), 2.)), (Metal (cons_v 0.5 0.5 0.5)))
+let s2 = Hittable ((Sphere ((cons_v 15. 10. 2.), 2.)), (Glass 1.33))
+let s3 = Hittable ((Sphere ((cons_v 15. 5. 2.), 2.)), (Lambertian (cons_v 1. 0. 0.)))
 let random_color () = cons_v (Random.float 1.) (Random.float 1.) (Random.float 1.)
 let random_material () =
   let i = Random.int 3 in
@@ -42,11 +45,18 @@ let random_material () =
   if i = 1 then Lambertian (random_color ()) else
     Glass 1.33
 let random_spheres =
-  list_ij 10 10
-  |> List.map (fun (i, j) -> (Hittable ((Sphere ((cons_v  (float (2*i-10)) (float (2*j-10)) (0.4) ), 0.4)), (random_material ())  )))
+  list_ij 20 20
+  |> List.map (fun (i, j) -> (Hittable ((Sphere ((cons_v  (Random.float 1. +. float (2*i)) (Random.float 1. +. float (2*j)) (0.4) ), 0.4)), (random_material ())  )))
 let world = HittableList (
-    (Hittable ((Sphere ((cons_v  0. 0. (-10000.), 10000.))), mat_floor)) :: random_spheres
+    s1::s2::s3::(Hittable ((Sphere ((cons_v  0. 0. (-10000.), 10000.))), mat_floor)) :: random_spheres
   );;
+
+let rec mininlist f = function
+  | [] -> None
+  | a::t ->
+    match mininlist f t with
+    | None -> Some a
+    | Some m -> if f a m then Some a else Some m
 
 let rec hit ray h = match h with
   | Hittable ((Sphere (sp, sr)), mat) ->
@@ -69,9 +79,7 @@ let rec hit ray h = match h with
 
   | HittableList l ->
     let hrl = List.filter_map (hit ray) l in
-    match List.sort (fun hr1 hr2 -> Stdlib.compare hr1.t hr2.t) hrl with
-    | [] -> None
-    | a::_ -> Some a
+    mininlist (fun hr1 hr2 -> hr1.t <= hr2.t) hrl
 
 ;;
 let rec random_point_in_sphere rad pos =
@@ -112,7 +120,7 @@ let rec color_of_ray depth ray =
           in
           color_of_ray (depth - 1) {a=hr.p; b=normalize r}
       end
-    | None -> let t = 0.5 *. ray.b.y +. 0.5 in (1.0 -. t) *~ (cons_v 1.0 1.0 1.0) +~ t *~ (cons_v 0.2 0.2 1.0)
+    | None -> let t = 0.5 *. ray.b.z +. 0.5 in (1.0 -. t) *~ (cons_v 1.0 1.0 1.0) +~ t *~ (cons_v 0.2 0.2 1.0)
 
 ;;
 let compute_rays rpp ca =
@@ -137,7 +145,7 @@ let compute_rays rpp ca =
 
 let channel = open_out "temp.ppm" in
 mycamera ()
-|> compute_rays 20
+|> compute_rays 200
 |> output_string channel;
 close_out channel;
 let result = Sys.command "convert temp.ppm image.png && eog -w image.png &" in
